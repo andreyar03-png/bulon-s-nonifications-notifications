@@ -1,0 +1,6 @@
+aiogram>=3.7
+APScheduler>=3.10
+google-api-python-client>=2.120
+google-auth>=2.28
+python-dotenv>=1.0
+tzdata; sys_platform == "win32"
