@@ -15,7 +15,7 @@ load_dotenv()
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command, CommandObject
-from aiogram.types import BotCommand, Message
+from aiogram.types import BotCommand, ErrorEvent, Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -232,22 +232,40 @@ async def daily_job():
     now = today()
     if not rules.is_workday(now) or not db.mark_sent(f"daily:{now}"):
         return
-    items, undated, unparsed = await asyncio.to_thread(plans.load)
-    sl = await slots_from(now)
-    await send(daily_text(now, items, undated, unparsed, sl))
+    try:
+        items, undated, unparsed = await asyncio.to_thread(plans.load, True)
+        sl = await slots_from(now)
+        await send(daily_text(now, items, undated, unparsed, sl))
+    except Exception:
+        logging.exception("Ошибка вечернего джоба")
+        await send(["⚠️ Вечерняя сводка не отправилась из-за ошибки, см. лог на сервере."])
 
 
 async def report_job():
     now = today()
     if not db.mark_sent(f"report:{now}"):
         return
-    items, _, _ = await asyncio.to_thread(plans.load)
-    mon, sun = week_bounds(now)
-    sl = await asyncio.to_thread(plans.slots, now, sun + dt.timedelta(days=14))
-    await send(report_text(now, items, sl))
+    try:
+        items, _, _ = await asyncio.to_thread(plans.load)
+        _, sun = week_bounds(now)
+        sl = await asyncio.to_thread(plans.slots, now, sun + dt.timedelta(days=14))
+        await send(report_text(now, items, sl))
+    except Exception:
+        logging.exception("Ошибка пятничного отчёта")
+        await send(["⚠️ Недельный отчёт не отправился из-за ошибки, см. лог на сервере."])
 
 
 # ---------- команды (для ручной проверки) ----------
+
+@dp.errors()
+async def on_error(event: ErrorEvent):
+    """Без этого исключение в хендлере тихо проглатывается aiogram — в консоли есть
+    трейсбек, а в чат не прилетает ничего, и со стороны выглядит как «бот завис»."""
+    logging.exception("Ошибка в обработчике команды", exc_info=event.exception)
+    if event.update.message:
+        await event.update.message.answer(
+            "⚠️ Не получилось: Google API недоступен или временная ошибка. Попробуйте ещё раз через минуту.")
+
 
 @dp.message(Command("start", "help"))
 async def cmd_help(m: Message):
@@ -264,7 +282,7 @@ async def cmd_help(m: Message):
 
 @dp.message(Command("today"))
 async def cmd_today(m: Message):
-    items, undated, unparsed = await asyncio.to_thread(plans.load)
+    items, undated, unparsed = await asyncio.to_thread(plans.load, True)
     sl = await slots_from(today())
     await reply(m, summary_text(today(), items, undated, unparsed, sl))
 
@@ -272,7 +290,7 @@ async def cmd_today(m: Message):
 @dp.message(Command("tomorrow"))
 async def cmd_tomorrow(m: Message):
     tgt = today() + dt.timedelta(days=1)
-    items, undated, unparsed = await asyncio.to_thread(plans.load)
+    items, undated, unparsed = await asyncio.to_thread(plans.load, True)
     sl = await slots_from(tgt)
     await reply(m, summary_text(tgt, items, undated, unparsed, sl))
 
@@ -302,7 +320,7 @@ async def cmd_time(m: Message, command: CommandObject):
 
 @dp.message(Command("plan"))
 async def cmd_plan(m: Message):
-    items, undated, unparsed = await asyncio.to_thread(plans.load)
+    items, undated, unparsed = await asyncio.to_thread(plans.load, True)
     sl = await slots_from(today())
     await reply(m, daily_text(today(), items, undated, unparsed, sl))
 

@@ -218,6 +218,25 @@ def test_chunks_keep_blockquote_atomic():
         assert c.count("<blockquote") == c.count("</blockquote>")
 
 
+def test_on_error_replies():
+    """Исключение в любом хендлере не должно тихо теряться — on_error() ловит его
+    централизованно (aiogram @dp.errors()) и отвечает в чат, откуда пришла команда."""
+    import asyncio
+    from types import SimpleNamespace
+
+    answered = []
+
+    async def fake_answer(text):
+        answered.append(text)
+
+    event = SimpleNamespace(
+        exception=RuntimeError("boom"),
+        update=SimpleNamespace(message=SimpleNamespace(answer=fake_answer)),
+    )
+    asyncio.run(bot.on_error(event))
+    assert answered and "Не получилось" in answered[0]
+
+
 def test_calendar_slots():
     """Настоящие названия событий из агентского календаря."""
     def ev(day, summary, allday=False, span=1):
